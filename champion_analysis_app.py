@@ -17,36 +17,6 @@ st.set_page_config(
 st.title("⚔️ Champion Analysis - Patch Comparison")
 st.markdown("---")
 
-# ═══════════════════════════════════════════════
-# Data Dragon champion name formatter
-# ═══════════════════════════════════════════════
-
-def format_champion_for_ddragon(name: str) -> str:
-    """
-    Normalize champion name for Data Dragon.
-    - Fix casing per word
-    - Remove spaces & apostrophes
-    - Apply Riot exceptions
-    """
-
-    # Trim + normalize spacing
-    name = name.strip()
-
-    # Capitalize EACH word correctly
-    name = " ".join(word.capitalize() for word in name.split(" "))
-
-    # Remove spaces and apostrophes
-    clean = name.replace("'", "").replace(" ", "")
-
-    # Riot internal exceptions
-    special_cases = {
-        "kogmaw": "KogMaw"
-    }
-
-    return special_cases.get(clean, clean)
-
-
-
 def detect_patch_columns(df):
     """
     Automatically detect patch columns in the dataframe.
@@ -420,9 +390,21 @@ else:
         for i, (idx, row) in enumerate(top_changes.iterrows()):
             champ_name = row['champion']
             # Format champion name for Data Dragon
+            champ_formatted = champ_name.capitalize().replace("'", "").replace(" ", "")
             
-            champ_formatted = format_champion_for_ddragon(champ_name)
-
+            # ═══════════════════════════════════════════════════════
+            # 🔧 EDIT THIS SECTION TO FIX CHAMPION NAME TYPOS
+            # ═══════════════════════════════════════════════════════
+            special_names = {
+                'Wukong': 'MonkeyKing',
+                'Nunu': 'Nunu',
+                'Renata': 'Renata',
+                'Belveth': 'Belveth'
+                # Add more mappings here:
+                # 'YourChampionName': 'CorrectDDragonName',
+            }
+            if champ_formatted in special_names:
+                champ_formatted = special_names[champ_formatted]
             # ═══════════════════════════════════════════════════════
             
             # Data Dragon URL (latest version)
@@ -504,7 +486,12 @@ else:
                 text=f"<b>{wr_final:.2f}%</b>",  # ← Displays row[new_col] = new patch WR
                 xanchor='left',
                 showarrow=False,
-                font=dict(size=14, color='white', family='Arial')
+                font=dict(size=14, color='white', family='Arial'),
+                bgcolor='#3a3a3a',  # Dark gray background
+                bordercolor='#555555',  # Slightly lighter border
+                borderwidth=1,
+                borderpad=6,  # Padding around text
+                opacity=0.9
             )
         
         fig.update_layout(
