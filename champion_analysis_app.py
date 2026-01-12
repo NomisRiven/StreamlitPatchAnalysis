@@ -215,13 +215,6 @@ with st.sidebar:
                 step=0.1,
                 help="Display only champions with change >= this value"
             )
-            
-            # Sort choice
-            sort_by = st.radio(
-                "Sort by",
-                ["Biggest changes", f"Best WR ({new_patch})", f"Worst WR ({new_patch})"],
-                help="Choose how to organize champions"
-            )
         
         elif graph_type == "Specific champions":
             champions = sorted(df['champion'].unique().tolist())
@@ -341,203 +334,210 @@ else:
             "Banrate": col_mapping['new_br']
         }[metric_choice]
         
-        # Sort by absolute change
-        top_changes = filtered_df.copy()
-        
-        # Apply minimum WR change filter
+        # Filter by minimum change if needed
+        filtered_changes = filtered_df.copy()  # Use filtered_df to respect role and min_games filters
         if wr_filter > 0:
-            top_changes = top_changes[top_changes['wr_change'].abs() >= wr_filter]
+            filtered_changes = filtered_changes[filtered_changes['wr_change'].abs() >= wr_filter]
         
-        # Apply sorting based on user choice
-        if sort_by == "Biggest changes":
-            top_changes['abs_change'] = top_changes[change_col].abs()
-            top_changes = top_changes.nlargest(top_n, 'abs_change')
-            top_changes = top_changes.sort_values(change_col)  # Worst to best change
-            top_changes = top_changes.drop('abs_change', axis=1)
-        elif f"Best WR ({new_patch})" in sort_by:
-            top_changes = top_changes.nlargest(top_n, new_col)
-            # Sort best (top) to worst (bottom) for correct display
-            top_changes = top_changes.sort_values(new_col, ascending=True)
-        else:  # Worst WR
-            top_changes = top_changes.nsmallest(top_n, new_col)
-            # Sort worst (top) to best (bottom) for correct display
-            top_changes = top_changes.sort_values(new_col, ascending=False)
+        # Separate buffs and nerfs
+        buffs = filtered_changes[filtered_changes[change_col] > 0].copy()
+        nerfs = filtered_changes[filtered_changes[change_col] < 0].copy()
         
-        # Create bar chart
-        fig = go.Figure()
+        # Get top N based on change magnitude
+        buffs = buffs.nlargest(top_n, change_col)  # Biggest positive changes
+        nerfs = nerfs.nsmallest(top_n, change_col)  # Biggest negative changes (most negative)
         
-        # Labels - use index numbers instead of names (images will show champions)
-        labels = list(range(len(top_changes)))
+        # Sort for display
+        buffs = buffs.sort_values(change_col, ascending=True)  # Smallest buff at bottom, biggest at top
+        nerfs = nerfs.sort_values(change_col, ascending=False)  # Biggest nerf at TOP, smallest at bottom (inverted!)
         
-        # Very light gray bars (current patch value)
-        fig.add_trace(go.Bar(
-            y=labels,
-            x=top_changes[new_col],  # ← Displays WR from new patch
-            name=f'{metric_choice} {new_patch}',
-            orientation='h',
-            marker=dict(
-                color='#F8F8F8',  # Very very light gray, almost white
-                opacity=1.0,
-                line=dict(color='#E0E0E0', width=1)  # Light border to see bars
-            ),
-            text='',  # No text on gray bars
-            textposition='inside',
-            customdata=[[f"{row['champion']} ({row['lane']})", row[new_col]] for _, row in top_changes.iterrows()],
-            hovertemplate='%{customdata[0]}<br>' + f'{metric_choice}: %{{customdata[1]:.2f}}%<extra></extra>'
-        ))
-        
-        # Add champion images on the left side of the chart
-        for i, (idx, row) in enumerate(top_changes.iterrows()):
-            champ_name = row['champion']
-            # Format champion name for Data Dragon
-            champ_formatted = champ_name.capitalize().replace("'", "").replace(" ", "")
+        # Function to create a chart
+        def create_change_chart(data, title_suffix, color_main):
+            if len(data) == 0:
+                return None
+                
+            fig = go.Figure()
             
-            # ═══════════════════════════════════════════════════════
-            # 🔧 EDIT THIS SECTION TO FIX CHAMPION NAME TYPOS
-            # ═══════════════════════════════════════════════════════
-            special_names = {
-                'Wukong': 'MonkeyKing',
-                'Nunu': 'Nunu',
-                'Renata': 'Renata',
-                'Belveth': 'Belveth'
-                # Add more mappings here:
-                # 'YourChampionName': 'CorrectDDragonName',
-            }
-            if champ_formatted in special_names:
-                champ_formatted = special_names[champ_formatted]
-            # ═══════════════════════════════════════════════════════
+            # Labels - use index numbers instead of names (images will show champions)
+            labels = list(range(len(data)))
             
-            # Data Dragon URL (latest version)
-            img_url = f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/champion/{champ_formatted}.png"
+            # Very light gray bars (current patch value)
+            fig.add_trace(go.Bar(
+                y=labels,
+                x=data[new_col],
+                name=f'{metric_choice} {new_patch}',
+                orientation='h',
+                marker=dict(
+                    color='#F8F8F8',
+                    opacity=1.0,
+                    line=dict(color='#E0E0E0', width=1)
+                ),
+                text='',
+                textposition='inside',
+                customdata=[[f"{row['champion']} ({row['lane']})", row[new_col]] for _, row in data.iterrows()],
+                hovertemplate='%{customdata[0]}<br>' + f'{metric_choice}: %{{customdata[1]:.2f}}%<extra></extra>'
+            ))
             
-            # Add image annotation
-            fig.add_layout_image(
-                dict(
-                    source=img_url,
-                    xref="paper",
-                    yref="y",
-                    x=-0.02,  # Position on the left
-                    y=i,
-                    sizex=0.025,  # Image width relative to plot
-                    sizey=0.8,  # Image height
-                    xanchor="right",
-                    yanchor="middle",
-                    layer="above"
+            # Add champion images
+            for i, (idx, row) in enumerate(data.iterrows()):
+                champ_name = row['champion']
+                champ_formatted = champ_name.capitalize().replace("'", "").replace(" ", "")
+                
+                # Special champion name mappings
+                special_names = {
+                    'Wukong': 'MonkeyKing',
+                    'Nunu': 'Nunu',
+                    'Renata': 'Renata',
+                    'Belveth': 'Belveth',
+                    'Kogmaw': 'KogMaw',
+                    'Leesin': 'LeeSin',
+                    'Masteryi': 'MasterYi',
+                    'Missfortune': 'MissFortune',
+                    'Twistedfate': 'TwistedFate',
+                    'Tahmkench': 'TahmKench',
+                    'Xinzhao': 'XinZhao',
+                    'Aurelionsol': 'AurelionSol',
+                    'Chogath': 'Chogath',
+                    'Drmundo': 'DrMundo',
+                    'Jarvaniv': 'JarvanIV',
+                    'Khazix': 'Khazix',
+                    'Reksai': 'RekSai',
+                    'Velkoz': 'Velkoz',
+                    'Kaisa': 'Kaisa',
+                    'Ksante': 'KSante'
+                }
+                if champ_formatted in special_names:
+                    champ_formatted = special_names[champ_formatted]
+                
+                img_url = f"https://ddragon.leagueoflegends.com/cdn/14.24.1/img/champion/{champ_formatted}.png"
+                
+                fig.add_layout_image(
+                    dict(
+                        source=img_url,
+                        xref="paper",
+                        yref="y",
+                        x=-0.02,
+                        y=i,
+                        sizex=0.025,
+                        sizey=0.8,
+                        xanchor="right",
+                        yanchor="middle",
+                        layer="above"
+                    )
                 )
-            )
-        
-        # Add change at end of bar (green or red)
-        for i, (idx, row) in enumerate(top_changes.iterrows()):
-            change_value = row[change_col]
-            wr_final = row[new_col]
-            color = '#44DD44' if change_value >= 0 else '#FF4444'
             
-            # Rectangle for change (same size as bar)
-            if change_value >= 0:
-                # For gains: green bar OVERLAID on end of white bar
-                # Goes from (wr_final - change_value) to wr_final
+            # Add colored bars and annotations
+            for i, (idx, row) in enumerate(data.iterrows()):
+                change_value = row[change_col]
+                wr_final = row[new_col]
+                
+                # Colored bar overlay
                 fig.add_shape(
                     type="rect",
-                    x0=wr_final - change_value,  # Starts at old patch WR
+                    x0=wr_final - abs(change_value),
                     y0=i - 0.4,
-                    x1=wr_final,  # Ends at new patch WR
+                    x1=wr_final,
                     y1=i + 0.4,
-                    fillcolor=color,
+                    fillcolor=color_main,
                     opacity=0.9,
                     line=dict(width=0)
                 )
-                # Text centered on green bar
+                
+                # Change value text on colored bar
                 fig.add_annotation(
-                    x=wr_final - (change_value / 2),
+                    x=wr_final - (abs(change_value) / 2),
                     y=i,
                     text=f"<b>{change_value:+.2f}</b>",
                     xanchor='center',
                     showarrow=False,
                     font=dict(size=13, color='white', family='Arial Black')
                 )
-            else:
-                # For losses: red bar AFTER white bar
-                # Starts at wr_final and goes to the right
-                fig.add_shape(
-                    type="rect",
-                    x0=wr_final,
-                    y0=i - 0.4,
-                    x1=wr_final + abs(change_value) * 0.3,  # Proportional width
-                    y1=i + 0.4,
-                    fillcolor=color,
-                    opacity=0.95,
-                    line=dict(width=0)
-                )
-                # Text centered on red bar
+                
+                # Final WR with background
+                max_x = data[new_col].max()
                 fig.add_annotation(
-                    x=wr_final + (abs(change_value) * 0.15),
+                    x=max_x + 4,
                     y=i,
-                    text=f"<b>{change_value:+.2f}</b>",
-                    xanchor='center',
+                    text=f"<b>{wr_final:.2f}%</b>",
+                    xanchor='left',
                     showarrow=False,
-                    font=dict(size=13, color='white', family='Arial Black')
+                    font=dict(size=14, color='white', family='Arial'),
+                    bgcolor='#3a3a3a',
+                    bordercolor='#555555',
+                    borderwidth=1,
+                    borderpad=6,
+                    opacity=0.9
                 )
             
-            # Final WR on right of graph (corresponds to new patch WR - same value as gray bar length)
-            max_x = top_changes[new_col].max()
-            fig.add_annotation(
-                x=max_x + 4,  # Fixed position on right
-                y=i,
-                text=f"<b>{wr_final:.2f}%</b>",  # ← Displays row[new_col] = new patch WR
-                xanchor='left',
-                showarrow=False,
-                font=dict(size=14, color='white', family='Arial'),
-                bgcolor='#3a3a3a',  # Dark gray background
-                bordercolor='#555555',  # Slightly lighter border
-                borderwidth=1,
-                borderpad=6,  # Padding around text
-                opacity=0.9
+            fig.update_layout(
+                title=dict(
+                    text=f"Top {len(data)} {title_suffix} - {metric_choice} Changes ({old_patch} → {new_patch})",
+                    font=dict(size=22, family='Arial Black', color='white')
+                ),
+                xaxis_title=dict(
+                    text=f"{metric_choice} (%)",
+                    font=dict(color='white')
+                ),
+                yaxis_title=dict(
+                    text=" ",
+                    font=dict(color='white')
+                ),
+                height=max(600, len(data) * 35),
+                barmode='overlay',
+                showlegend=False,
+                hovermode='y unified',
+                margin=dict(l=180, r=100, t=100, b=80),
+                xaxis=dict(
+                    range=[40, data[new_col].max() + 5],
+                    title_font=dict(size=16, color='white'),
+                    tickfont=dict(color='white'),
+                    gridcolor='#333333'
+                ),
+                yaxis=dict(
+                    title_font=dict(size=16, color='white'),
+                    tickfont=dict(size=13, color='white'),
+                    gridcolor='#333333',
+                    showticklabels=False
+                ),
+                plot_bgcolor='#1E1E1E',
+                paper_bgcolor='#1E1E1E',
+                font=dict(size=14, color='white')
             )
+            
+            return fig
         
-        fig.update_layout(
-            title=dict(
-                text=f"Top {top_n} - {metric_choice} Changes ({old_patch} → {new_patch})",
-                font=dict(size=22, family='Arial Black', color='white')
-            ),
-            xaxis_title=dict(
-                text=f"{metric_choice} (%)",
-                font=dict(color='white')
-            ),
-            yaxis_title=dict(
-                text=" ",
-                font=dict(color='white')
-            ),
-            height=max(800, top_n * 35),
-            barmode='overlay',
-            showlegend=False,
-            hovermode='y unified',
-            margin=dict(l=180, r=100, t=100, b=80),  # More space on left for images
-            xaxis=dict(
-                range=[40, top_changes[new_col].max() + 5],
-                title_font=dict(size=16, color='white'),
-                tickfont=dict(color='white'),
-                gridcolor='#333333'
-            ),
-            yaxis=dict(
-                title_font=dict(size=16, color='white'),
-                tickfont=dict(size=13, color='white'),
-                gridcolor='#333333',
-                showticklabels=False  # Hide text labels since we have images
-            ),
-            plot_bgcolor='#1E1E1E',  # Dark graph background
-            paper_bgcolor='#1E1E1E',  # Dark general background
-            font=dict(size=14, color='white')
-        )
+        # Create both charts
+        st.subheader("🟢 Biggest Buffs")
+        fig_buffs = create_change_chart(buffs, "Buffs", '#44DD44')
+        if fig_buffs:
+            st.plotly_chart(fig_buffs, width="stretch")
+            
+            # Data table for buffs
+            with st.expander("📋 Detailed Data - Buffs"):
+                display_cols = ['champion', 'lane', old_col, new_col, change_col, col_mapping['new_games']]
+                st.dataframe(
+                    buffs[display_cols].sort_values(change_col, ascending=False),
+                    width="stretch"
+                )
+        else:
+            st.info("No champions with positive changes found")
         
-        st.plotly_chart(fig, use_container_width=True)
+        st.markdown("---")
         
-        # Data table
-        st.subheader("📋 Detailed Data")
-        display_cols = ['champion', 'lane', old_col, new_col, change_col, col_mapping['new_games']]
-        st.dataframe(
-            top_changes[display_cols].sort_values(change_col, ascending=False),
-            use_container_width=True
-        )
+        st.subheader("🔴 Biggest Nerfs")
+        fig_nerfs = create_change_chart(nerfs, "Nerfs", '#FF4444')
+        if fig_nerfs:
+            st.plotly_chart(fig_nerfs, width="stretch")
+            
+            # Data table for nerfs
+            with st.expander("📋 Detailed Data - Nerfs"):
+                display_cols = ['champion', 'lane', old_col, new_col, change_col, col_mapping['new_games']]
+                st.dataframe(
+                    nerfs[display_cols].sort_values(change_col, ascending=True),
+                    width="stretch"
+                )
+        else:
+            st.info("No champions with negative changes found")
     
     elif graph_type == "Scatter plot":
         # Scatter plot to see relationships
@@ -571,7 +571,7 @@ else:
         ))
         
         fig.update_layout(height=600)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width="stretch")
     
     elif graph_type == "Compare by role":
         # Boxplot by role
@@ -587,7 +587,7 @@ else:
                 labels={'wr_change': 'WR Change (%)', 'lane': 'Role'}
             )
             fig1.add_hline(y=0, line_dash="dash", line_color="gray")
-            st.plotly_chart(fig1, use_container_width=True)
+            st.plotly_chart(fig1, width="stretch")
         
         with col2:
             # Average by role
@@ -611,11 +611,11 @@ else:
             )
             fig2.update_traces(texttemplate='%{text:.2f}%', textposition='outside')
             fig2.add_hline(y=0, line_dash="dash", line_color="gray")
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, width="stretch")
         
         # Summary table
         st.subheader("📊 Statistics by Role")
-        st.dataframe(role_avg.sort_values('avg_wr_change', ascending=False), use_container_width=True)
+        st.dataframe(role_avg.sort_values('avg_wr_change', ascending=False), width="stretch")
     
     elif graph_type == "Specific champions":
         if not selected_champions:
@@ -683,13 +683,13 @@ else:
                     title_text=f"Detailed Analysis of Selected Champions ({old_patch} → {new_patch})"
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
                 
                 # Detailed table
                 st.subheader("📋 Champion Details")
                 display_cols = ['champion', 'lane', col_mapping['old_wr'], col_mapping['new_wr'], 'wr_change',
                                col_mapping['old_pr'], col_mapping['new_pr'], 'pr_change', col_mapping['new_games']]
-                st.dataframe(champ_data[display_cols], use_container_width=True)
+                st.dataframe(champ_data[display_cols], width="stretch")
 
 # Footer
 st.markdown("---")
